@@ -38,7 +38,7 @@ import (
 )
 
 var (
-	hostPortRegex = regexp.MustCompile(`\[?(.+?)\]?:\d+$`)
+	hostPortRegex = regexp.MustCompile(`^(?:\[(.+)\]:\d+|([^:]+):\d+)$`)
 	scopeRegex    = regexp.MustCompile(`([a-z0-9]+)(\([a-z0-9]+\))?`)
 )
 
@@ -48,6 +48,8 @@ type AuthServer struct {
 	authorizers    []api.Authorizer
 	ga             *authn.GoogleAuth
 	gha            *authn.GitHubAuth
+	oidc           *authn.OIDCAuth
+	glab		       *authn.GitlabAuth
 }
 
 func NewAuthServer(c *Config) (*AuthServer, error) {
@@ -101,6 +103,22 @@ func NewAuthServer(c *Config) (*AuthServer, error) {
 		}
 		as.authenticators = append(as.authenticators, gha)
 		as.gha = gha
+	}
+	if c.OIDCAuth != nil {
+		oidc, err := authn.NewOIDCAuth(c.OIDCAuth)
+		if err != nil {
+			return nil, err
+		}
+		as.authenticators = append(as.authenticators, oidc)
+		as.oidc = oidc
+	}
+	if c.GitlabAuth != nil {
+		glab, err := authn.NewGitlabAuth(c.GitlabAuth)
+		if err != nil {
+			return nil, err
+		}
+		as.authenticators = append(as.authenticators, glab)
+		as.glab = glab
 	}
 	if c.LDAPAuth != nil {
 		la, err := authn.NewLDAPAuth(c.LDAPAuth)
@@ -182,7 +200,11 @@ func (ar authRequest) String() string {
 func parseRemoteAddr(ra string) net.IP {
 	hp := hostPortRegex.FindStringSubmatch(ra)
 	if hp != nil {
-		ra = string(hp[1])
+		if hp[1] != "" {
+			ra = hp[1]
+		} else if hp[2] != "" {
+			ra = hp[2]
+		}
 	}
 	res := net.ParseIP(ra)
 	return res
@@ -423,6 +445,10 @@ func (as *AuthServer) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		as.ga.DoGoogleAuth(rw, req)
 	case req.URL.Path == path_prefix+"/github_auth" && as.gha != nil:
 		as.gha.DoGitHubAuth(rw, req)
+	case req.URL.Path == path_prefix+"/oidc_auth" && as.oidc != nil:
+		as.oidc.DoOIDCAuth(rw, req)
+	case req.URL.Path == path_prefix+"/gitlab_auth" && as.glab != nil:
+		as.glab.DoGitlabAuth(rw, req)
 	default:
 		http.Error(rw, "Not found", http.StatusNotFound)
 		return
@@ -438,6 +464,12 @@ func (as *AuthServer) doIndex(rw http.ResponseWriter, req *http.Request) {
 		fmt.Fprint(rw, `<p><a href="/google_auth">Login with Google account</a></p>`)
 	case as.gha != nil:
 		url := as.config.Server.PathPrefix + "/github_auth"
+		http.Redirect(rw, req, url, 301)
+	case as.oidc != nil:
+		url := as.config.Server.PathPrefix + "/oidc_auth"
+		http.Redirect(rw, req, url, 301)
+	case as.glab != nil:
+		url := as.config.Server.PathPrefix + "/gitlab_auth"
 		http.Redirect(rw, req, url, 301)
 	default:
 		rw.Header().Set("Content-Type", "text/html; charset=utf-8")
