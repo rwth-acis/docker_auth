@@ -232,6 +232,7 @@ func validate(c *Config) error {
 		if oidc.HTTPTimeout <= 0 {
 			oidc.HTTPTimeout = 10
 		}
+	}
 	if glab := c.GitlabAuth; glab != nil {
 		if glab.ClientSecretFile != "" {
 			contents, err := ioutil.ReadFile(glab.ClientSecretFile)
